@@ -157,3 +157,4 @@ class StrictJsonDeserializationVisitor implements DeserializationVisitorInterfac
     }
 
 }
+
