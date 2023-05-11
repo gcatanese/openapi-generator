@@ -25,6 +25,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
@@ -125,6 +126,9 @@ public class TestContainersCodegen extends DefaultCodegen implements CodegenConf
             if (op.path != null) {
                 op.path = op.path.replaceAll("\\{(.*?)\\}", ":$1");
             }
+
+            List<ExampleItem> items = getExampleItems(op);
+
         }
         return objs;
     }
@@ -224,9 +228,34 @@ public class TestContainersCodegen extends DefaultCodegen implements CodegenConf
         return outputFolder + File.separator + apiPackage().replace('.', File.separatorChar);
     }
 
-    // Supporting models
-    public class PostmanRequestItem {
+    List<ExampleItem> getExampleItems(CodegenOperation codegenOperation) {
+        List<ExampleItem> items = new ArrayList<>();
 
+        return items;
+
+    }
+
+    // Supporting models
+    public class ExampleItem {
+
+        private String requestBody;
+        private String responseBody;
+
+        public String getRequestBody() {
+            return requestBody;
+        }
+
+        public void setRequestBody(String requestBody) {
+            this.requestBody = requestBody;
+        }
+
+        public String getResponseBody() {
+            return responseBody;
+        }
+
+        public void setResponseBody(String responseBody) {
+            this.responseBody = responseBody;
+        }
     }
 
 }
