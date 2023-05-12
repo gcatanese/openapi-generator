@@ -16,7 +16,15 @@
 
 package org.openapitools.codegen.languages;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.swagger.v3.oas.models.examples.Example;
+import io.swagger.v3.oas.models.media.Schema;
 import org.openapitools.codegen.*;
+import org.openapitools.codegen.meta.GeneratorMetadata;
+import org.openapitools.codegen.meta.Stability;
 import org.openapitools.codegen.meta.features.*;
 import org.openapitools.codegen.model.ModelMap;
 import org.openapitools.codegen.model.OperationMap;
@@ -25,24 +33,27 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.EnumSet;
-import java.util.List;
+import java.util.*;
 
-public class TestContainersCodegen extends DefaultCodegen implements CodegenConfig {
+public class TestContainersCodegen extends AbstractGoCodegen implements CodegenConfig {
 
     private final Logger LOGGER = LoggerFactory.getLogger(TestContainersCodegen.class);
 
-    protected String apiVersion = "1.0.0";
     protected int serverPort = 8080;
     protected String projectName = "openapi-test-containers";
     protected String apiPath = "api";
 
     protected String packageName = "openapi";
 
+    public static final String JSON_ESCAPE_DOUBLE_QUOTE = "";
+    public static final String JSON_ESCAPE_NEW_LINE = "";
+
     public TestContainersCodegen() {
         super();
+
+        generatorMetadata = GeneratorMetadata.newBuilder(generatorMetadata)
+                .stability(Stability.EXPERIMENTAL)
+                .build();
 
         modifyFeatureSet(features -> features
                 .includeDocumentationFeatures(DocumentationFeature.Readme)
@@ -122,12 +133,16 @@ public class TestContainersCodegen extends DefaultCodegen implements CodegenConf
 
         OperationMap operations = objs.getOperations();
         List<CodegenOperation> operationList = operations.getOperation();
-        for (CodegenOperation op : operationList) {
-            if (op.path != null) {
-                op.path = op.path.replaceAll("\\{(.*?)\\}", ":$1");
+        for (CodegenOperation codegenOperation : operationList) {
+            if (codegenOperation.path != null) {
+                codegenOperation.path = codegenOperation.path.replaceAll("\\{(.*?)\\}", ":$1");
             }
 
-            List<ExampleItem> items = getExampleItems(op);
+            List<ExampleItem> items = getExampleItems(codegenOperation);
+
+            if(!items.isEmpty()) {
+                codegenOperation.vendorExtensions.put("items", items);
+            }
 
         }
         return objs;
@@ -141,18 +156,12 @@ public class TestContainersCodegen extends DefaultCodegen implements CodegenConf
          * Additional Properties.  These values can be passed to the templates and
          * are available in models, apis, and supporting files
          */
-        if (additionalProperties.containsKey("apiVersion")) {
-            this.apiVersion = (String) additionalProperties.get("apiVersion");
-        } else {
-            additionalProperties.put("apiVersion", apiVersion);
-        }
 
         if (additionalProperties.containsKey("serverPort")) {
             this.serverPort = Integer.parseInt((String) additionalProperties.get("serverPort"));
         } else {
             additionalProperties.put("serverPort", serverPort);
         }
-
 
         modelPackage = packageName;
         apiPackage = packageName;
@@ -231,9 +240,160 @@ public class TestContainersCodegen extends DefaultCodegen implements CodegenConf
     List<ExampleItem> getExampleItems(CodegenOperation codegenOperation) {
         List<ExampleItem> items = new ArrayList<>();
 
+        ExampleItem item = new ExampleItem();
+
+        if(!codegenOperation.getHasBodyParam()) {
+            // no body param
+
+            item.setRequestBody("");
+            item.setResponseBody(getResponseBody(codegenOperation.responses));
+
+        } else {
+        }
+
+        items.add(item);
+
         return items;
 
     }
+
+    String getResponseBody(List<CodegenResponse> responses) {
+        String ret = "";
+
+        for(CodegenResponse codegenResponse : responses) {
+            // check CodegenMediaType example (to add)
+            // get from example
+            if(codegenResponse.getContent().get("application/json") != null &&
+                    codegenResponse.getContent().get("application/json").getExamples() != null) {
+                // get from examples
+
+                // use first
+                Optional<Map.Entry<String, Example>> firstExample = codegenResponse.getContent().get("application/json").getExamples().entrySet().stream().findFirst();
+                if(firstExample.isPresent()) {
+                    if(firstExample.get().getValue().getValue() != null) {
+                        Example example = firstExample.get().getValue();
+                        ret = getJsonFromExample(example);
+                    } else if(firstExample.get().getValue().get$ref() != null) {
+                        String exampleRef = firstExample.get().getValue().get$ref();
+                        Example example = this.openAPI.getComponents().getExamples().get(extractExampleByName(exampleRef));
+                        ret = getJsonFromExample(example);
+                    }
+                }
+
+            }
+            break;  // use one response
+        }
+
+        return ret;
+
+    }
+
+    String extractExampleByName(String ref) {
+        return ref.substring(ref.lastIndexOf("/") + 1);
+    }
+
+    // Supporting helpers
+
+    public String getType(CodegenProperty codegenProperty) {
+        if(codegenProperty.isNumeric) {
+            return "number";
+        } else if(codegenProperty.isDate) {
+            return "date";
+        } else {
+            return "string";
+        }
+    }
+
+    public String getJsonFromExample(Example example) {
+        String ret = "";
+
+        if(example == null) {
+            return ret;
+        }
+
+        if(example.getValue() instanceof ObjectNode) {
+            ret = convertToJson((ObjectNode)example.getValue());
+        } else if(example.getValue() instanceof LinkedHashMap) {
+            ret = convertToJson((LinkedHashMap)example.getValue());
+        }
+
+        return ret;
+    }
+
+    // array of attributes from JSON payload (ignore commas within quotes)
+    public String[] getAttributes(String json) {
+        return json.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1);
+    }
+
+    public String convertToJson(ObjectNode objectNode) {
+        return formatJson(objectNode.toString());
+    }
+
+    // convert to JSON (string) escaping and formatting
+    public String convertToJson(LinkedHashMap<String, Object> linkedHashMap) {
+        String ret = "";
+
+        return traverseMap(linkedHashMap, ret);
+    }
+
+    public String formatJson(String json) {
+
+        ObjectMapper objectMapper = new ObjectMapper();
+
+        try {
+            JsonNode actualObj = objectMapper.readTree(json);
+            json = actualObj.toPrettyString();
+
+        } catch (JsonProcessingException e) {
+            LOGGER.warn("Error formatting JSON", e);
+            json = "";
+        }
+
+        return json;
+    }
+
+    // traverse recursively
+    private String traverseMap(LinkedHashMap<String, Object> linkedHashMap, String ret) {
+
+        ret = ret + "{" + JSON_ESCAPE_NEW_LINE + " ";
+
+        int numVars = linkedHashMap.entrySet().size();
+        int counter = 1;
+
+        for (Map.Entry<String, Object> mapElement : linkedHashMap.entrySet()) {
+            String key = mapElement.getKey();
+            Object value = mapElement.getValue();
+
+            if(value instanceof String) {
+                // unescape double quotes already escaped
+                //value = ((String)value).replace("\\\"", "\"");
+
+                ret = ret + "\"" + key + JSON_ESCAPE_DOUBLE_QUOTE + ": " +
+                        JSON_ESCAPE_DOUBLE_QUOTE + value + JSON_ESCAPE_DOUBLE_QUOTE;
+            } else if (value instanceof Integer) {
+                ret = ret + JSON_ESCAPE_DOUBLE_QUOTE + key + JSON_ESCAPE_DOUBLE_QUOTE + ": " +
+                        value;
+            } else if (value instanceof LinkedHashMap) {
+                String in = ret + "\"" + key + JSON_ESCAPE_DOUBLE_QUOTE + ": ";
+                ret = traverseMap(((LinkedHashMap<String, Object>) value),  in);
+            } else {
+                LOGGER.warn("Value type unrecognised: " + value.getClass());
+            }
+
+            if(counter < numVars) {
+                // add comma unless last attribute
+                ret = ret + "," + JSON_ESCAPE_NEW_LINE + " ";
+            }
+            counter++;
+        }
+
+        ret = ret + JSON_ESCAPE_NEW_LINE + "}";
+
+        return ret;
+    }
+
+
+
 
     // Supporting models
     public class ExampleItem {
