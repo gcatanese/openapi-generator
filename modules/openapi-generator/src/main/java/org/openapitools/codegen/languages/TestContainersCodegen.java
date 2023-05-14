@@ -37,462 +37,473 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public class TestContainersCodegen extends AbstractGoCodegen implements CodegenConfig {
 
-    private final Logger LOGGER = LoggerFactory.getLogger(TestContainersCodegen.class);
-
-    protected int serverPort = 8080;
-    protected String projectName = "openapi-test-containers";
-    protected String apiPath = "api";
-
-    protected String packageName = "openapi";
-
-    public static final String CONTRACT_ID_EXTENSION = "contractIdExtension";
-    public static final String CONTRACT_ID_EXTENSION_DEFAULT_VALUE = "x-contract-id";
-
-    protected String contractIdExtension = CONTRACT_ID_EXTENSION_DEFAULT_VALUE;
-
-
-
-    public static final String JSON_ESCAPE_DOUBLE_QUOTE = "";
-    public static final String JSON_ESCAPE_NEW_LINE = "";
-
-    public TestContainersCodegen() {
-        super();
-
-        generatorMetadata = GeneratorMetadata.newBuilder(generatorMetadata)
-                .stability(Stability.EXPERIMENTAL)
-                .build();
-
-        modifyFeatureSet(features -> features
-                .includeDocumentationFeatures(DocumentationFeature.Readme)
-                .wireFormatFeatures(EnumSet.of(WireFormatFeature.JSON, WireFormatFeature.XML))
-                .securityFeatures(EnumSet.noneOf(
-                        SecurityFeature.class
-                ))
-                .excludeGlobalFeatures(
-                        GlobalFeature.XMLStructureDefinitions,
-                        GlobalFeature.Callbacks,
-                        GlobalFeature.LinkObjects,
-                        GlobalFeature.ParameterStyling
-                )
-                .excludeSchemaSupportFeatures(
-                        SchemaSupportFeature.Polymorphism
-                )
-                .excludeParameterFeatures(
-                        ParameterFeature.Cookie
-                )
-        );
-
-        outputFolder = "generated-code/test-containers";
-
-        /*
-         * Models.  You can write model files using the modelTemplateFiles map.
-         * if you want to create one template for file, you can do so here.
-         * for multiple files for model, just put another entry in the `modelTemplateFiles` with
-         * a different extension
-         */
-        modelTemplateFiles.put(
-                "model.mustache",
-                ".go");
-
-        /*
-         * Api classes.  You can write classes for each Api file with the apiTemplateFiles map.
-         * as with models, add multiple entries with different extensions for multiple files per
-         * class
-         */
-        apiTemplateFiles.put(
-                "controller-api.mustache",   // the template to use
-                ".go");       // the extension for each file to write
-
-        /*
-         * Template Location.  This is the location which templates will be read from.  The generator
-         * will use the resource stream to attempt to read the templates.
-         */
-        embeddedTemplateDir = templateDir = "test-containers";
-
-        /*
-         * Reserved words.  Override this with reserved words specific to your language
-         */
-        setReservedWordsLowerCase(
-                Arrays.asList(
-                        // data type
-                        "string", "bool", "uint", "uint8", "uint16", "uint32", "uint64",
-                        "int", "int8", "int16", "int32", "int64", "float32", "float64",
-                        "complex64", "complex128", "rune", "byte", "uintptr",
-
-                        "break", "default", "func", "interface", "select",
-                        "case", "defer", "go", "map", "struct",
-                        "chan", "else", "goto", "package", "switch",
-                        "const", "fallthrough", "if", "range", "type",
-                        "continue", "for", "import", "return", "var", "error", "nil")
-                // Added "error" as it's used so frequently that it may as well be a keyword
-        );
-
-        CliOption optServerPort = new CliOption("serverPort", "The network port the generated server binds to");
-        optServerPort.setType("int");
-        optServerPort.defaultValue(Integer.toString(serverPort));
-        cliOptions.add(optServerPort);
-
-        cliOptions.add(CliOption.newString(CONTRACT_ID_EXTENSION, "name of the extension that defines the Contract Id"));
-
-    }
-
-    @Override
-    public OperationsMap postProcessOperationsWithModels(OperationsMap objs, List<ModelMap> allModels) {
-        objs = super.postProcessOperationsWithModels(objs, allModels);
-
-        OperationMap operations = objs.getOperations();
-        List<CodegenOperation> operationList = operations.getOperation();
-        for (CodegenOperation codegenOperation : operationList) {
-            if (codegenOperation.path != null) {
-                codegenOperation.path = codegenOperation.path.replaceAll("\\{(.*?)\\}", ":$1");
-            }
-
-            List<ExampleItem> items = getExampleItems(codegenOperation);
-
-            if(!items.isEmpty()) {
-                codegenOperation.vendorExtensions.put("items", items);
-            }
-
-        }
-        return objs;
-    }
-
-    @Override
-    public void processOpts() {
-        super.processOpts();
-
-        /*
-         * Additional Properties.  These values can be passed to the templates and
-         * are available in models, apis, and supporting files
-         */
-
-        if (additionalProperties.containsKey("serverPort")) {
-            this.serverPort = Integer.parseInt((String) additionalProperties.get("serverPort"));
-        } else {
-            additionalProperties.put("serverPort", serverPort);
-        }
-
-        if(additionalProperties().containsKey(CONTRACT_ID_EXTENSION)) {
-            contractIdExtension = additionalProperties().get(CONTRACT_ID_EXTENSION).toString();
-        }
-
-        modelPackage = packageName;
-        apiPackage = packageName;
-
-        /*
-         * Supporting Files.  You can write single files for the generator with the
-         * entire object tree available.  If the input file has a suffix of `.mustache
-         * it will be processed by the template engine.  Otherwise, it will be copied
-         */
-        supportingFiles.add(new SupportingFile("openapi.mustache", "api", "openapi.yaml"));
-        supportingFiles.add(new SupportingFile("main.mustache", "", "main.go"));
-        supportingFiles.add(new SupportingFile("Dockerfile.mustache", "", "Dockerfile"));
-        supportingFiles.add(new SupportingFile("routers.mustache", apiPath, "routers.go"));
-        supportingFiles.add(new SupportingFile("README.mustache", apiPath, "README.md")
-                .doNotOverwrite());
-        supportingFiles.add(new SupportingFile("go.mod.mustache", "go.mod"));
-    }
-
-    @Override
-    public String apiPackage() {
-        return apiPath;
-    }
-
-    /**
-     * Configures the type of generator.
-     *
-     * @return the CodegenType for this generator
-     * @see CodegenType
-     */
-    @Override
-    public CodegenType getTag() {
-        return CodegenType.SERVER;
-    }
-
-    @Override
-    public GeneratorLanguage generatorLanguage() {
-        return GeneratorLanguage.GO;
-    }
-
-    /**
-     * Configures a friendly name for the generator.  This will be used by the generator
-     * to select the library with the -g flag.
-     *
-     * @return the friendly name for the generator
-     */
-    @Override
-    public String getName() {
-        return "test-containers";
-    }
-
-    /**
-     * Returns human-friendly help for the generator.  Provide the consumer with help
-     * tips, parameters here
-     *
-     * @return A string value for the help message
-     */
-    @Override
-    public String getHelp() {
-        return "Generates a Go server from an OpenAPI-Generator.";
-    }
-
-    /**
-     * Location to write api files.  You can use the apiPackage() as defined when the class is
-     * instantiated
-     */
-    @Override
-    public String apiFileFolder() {
-        return outputFolder + File.separator + apiPackage().replace('.', File.separatorChar);
-    }
-
-    @Override
-    public String modelFileFolder() {
-        return outputFolder + File.separator + apiPackage().replace('.', File.separatorChar);
-    }
-
-    List<ExampleItem> getExampleItems(CodegenOperation codegenOperation) {
-        List<ExampleItem> items = new ArrayList<>();
-
-        if (!codegenOperation.getHasBodyParam()) {
-            // no body param
-            ExampleItem item = new ExampleItem();
-
-            item.setRequestBody(null);
-            item.setResponseBody(getResponseBody(codegenOperation.responses));
-            items.add(item);
-
-        } else {
-            // get request examples
-            if (codegenOperation.bodyParam.getContent().get("application/json") != null &&
-                    codegenOperation.bodyParam.getContent().get("application/json").getExamples() != null) {
-                for (Map.Entry<String, Example> entry : codegenOperation.bodyParam.getContent().get("application/json").getExamples().entrySet()) {
-
-                    ExampleItem item = new ExampleItem();
-
-
-                    Example responseExample = null;
-                    Example requestExample = null;
-
-                    if (entry.getValue().get$ref() != null) {
-                        requestExample = getExampleByRef(entry.getValue().get$ref());
-
-                        if (requestExample != null) {
-                            // find matching response example
-                            String contractId = (String) requestExample.getExtensions().get(contractIdExtension);
-                            String summary = requestExample.getSummary();
-
-                            if (contractId != null) {
-                                responseExample = getExampleByContractId(contractId, summary);
-
-                            }
-                        }
-
-                        if (responseExample != null) {
-                            item.setRequestBody(getJsonFromExample(requestExample));
-                            item.setResponseBody(getJsonFromExample(responseExample));
-
-                            items.add(item);
-
-                        }
-
-                    }
-
-                }
-            }
-
-
-        }
-        return items;
-    }
-
-    Example getExampleByRef(String ref) {
-        return this.openAPI.getComponents().getExamples().get(extractExampleByName(ref));
-    }
-
-    Example getExampleByContractId(String contractId, String summary) {
-        Example example = null;
-
-        for (Map.Entry<String, Example> responseEntry : this.openAPI.getComponents().getExamples().entrySet()) {
-            String contractId2 = (String) responseEntry.getValue().getExtensions().get(contractIdExtension);
-            if(contractId2.equalsIgnoreCase(contractId) && !responseEntry.getValue().getSummary().equals(summary)) {
-                example = responseEntry.getValue();
-                break;
-            }
-        }
-
-
-        return example;
-    }
-
-    String getResponseBody(List<CodegenResponse> responses) {
-        String ret = "";
-
-        for(CodegenResponse codegenResponse : responses) {
-            // check CodegenMediaType example (to add)
-            // get from example
-            if(codegenResponse.getContent().get("application/json") != null &&
-                    codegenResponse.getContent().get("application/json").getExamples() != null) {
-                // get from examples
-
-                // use first
-                Optional<Map.Entry<String, Example>> firstExample = codegenResponse.getContent().get("application/json").getExamples().entrySet().stream().findFirst();
-                if(firstExample.isPresent()) {
-                    if(firstExample.get().getValue().getValue() != null) {
-                        Example example = firstExample.get().getValue();
-                        ret = getJsonFromExample(example);
-                    } else if(firstExample.get().getValue().get$ref() != null) {
-                        String exampleRef = firstExample.get().getValue().get$ref();
-                        Example example = this.openAPI.getComponents().getExamples().get(extractExampleByName(exampleRef));
-                        ret = getJsonFromExample(example);
-                    }
-
-                }
-
-            }
-            break;  // use one response
-        }
-
-        return ret;
-
-    }
-
-    String extractExampleByName(String ref) {
-        return ref.substring(ref.lastIndexOf("/") + 1);
-    }
-
-    // Supporting helpers
-
-    public String getType(CodegenProperty codegenProperty) {
-        if(codegenProperty.isNumeric) {
-            return "number";
-        } else if(codegenProperty.isDate) {
-            return "date";
-        } else {
-            return "string";
-        }
-    }
-
-    public String getJsonFromExample(Example example) {
-        String ret = "";
-
-        if(example == null) {
-            return ret;
-        }
-
-        if(example.getValue() instanceof ObjectNode) {
-            ret = convertToJson((ObjectNode)example.getValue());
-        } else if(example.getValue() instanceof LinkedHashMap) {
-            ret = convertToJson((LinkedHashMap)example.getValue());
-        }
-
-        return ret;
-    }
-
-    // array of attributes from JSON payload (ignore commas within quotes)
-    public String[] getAttributes(String json) {
-        return json.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1);
-    }
-
-    public String convertToJson(ObjectNode objectNode) {
-        return formatJson(objectNode.toString());
-    }
-
-    // convert to JSON (string) escaping and formatting
-    public String convertToJson(LinkedHashMap<String, Object> linkedHashMap) {
-        String ret = "";
-
-        return traverseMap(linkedHashMap, ret);
-    }
-
-    public String formatJson(String json) {
-
-        ObjectMapper objectMapper = new ObjectMapper();
-
-        try {
-            JsonNode actualObj = objectMapper.readTree(json);
-            json = actualObj.toPrettyString();
-
-        } catch (JsonProcessingException e) {
-            LOGGER.warn("Error formatting JSON", e);
-            json = "";
-        }
-
-        return json;
-    }
-
-    // traverse recursively
-    private String traverseMap(LinkedHashMap<String, Object> linkedHashMap, String ret) {
-
-        ret = ret + "{" + JSON_ESCAPE_NEW_LINE + " ";
-
-        int numVars = linkedHashMap.entrySet().size();
-        int counter = 1;
-
-        for (Map.Entry<String, Object> mapElement : linkedHashMap.entrySet()) {
-            String key = mapElement.getKey();
-            Object value = mapElement.getValue();
-
-            if(value instanceof String) {
-                // unescape double quotes already escaped
-                //value = ((String)value).replace("\\\"", "\"");
-
-                ret = ret + "\"" + key + JSON_ESCAPE_DOUBLE_QUOTE + ": " +
-                        JSON_ESCAPE_DOUBLE_QUOTE + value + JSON_ESCAPE_DOUBLE_QUOTE;
-            } else if (value instanceof Integer) {
-                ret = ret + JSON_ESCAPE_DOUBLE_QUOTE + key + JSON_ESCAPE_DOUBLE_QUOTE + ": " +
-                        value;
-            } else if (value instanceof LinkedHashMap) {
-                String in = ret + "\"" + key + JSON_ESCAPE_DOUBLE_QUOTE + ": ";
-                ret = traverseMap(((LinkedHashMap<String, Object>) value),  in);
-            } else {
-                LOGGER.warn("Value type unrecognised: " + value.getClass());
-            }
-
-            if(counter < numVars) {
-                // add comma unless last attribute
-                ret = ret + "," + JSON_ESCAPE_NEW_LINE + " ";
-            }
-            counter++;
-        }
-
-        ret = ret + JSON_ESCAPE_NEW_LINE + "}";
-
-        return ret;
-    }
-
-
-
-
-    // Supporting models
-    public class ExampleItem {
-
-        private String statusCode;
-        private String requestBody;
-        private String responseBody;
-
-        public String getStatusCode() {
-            return statusCode;
-        }
-
-        public void setStatusCode(String statusCode) {
-            this.statusCode = statusCode;
-        }
-
-        public String getRequestBody() {
-            return requestBody;
-        }
-
-        public void setRequestBody(String requestBody) {
-            this.requestBody = requestBody;
-        }
-
-        public String getResponseBody() {
-            return responseBody;
-        }
-
-        public void setResponseBody(String responseBody) {
-            this.responseBody = responseBody;
-        }
-    }
+	private final Logger LOGGER = LoggerFactory.getLogger(TestContainersCodegen.class);
+
+	protected int serverPort = 8080;
+	protected String projectName = "openapi-test-containers";
+	protected String apiPath = "api";
+
+	protected String packageName = "openapi";
+
+	public static final String CONTRACT_ID_EXTENSION = "contractIdExtension";
+	public static final String CONTRACT_ID_EXTENSION_DEFAULT_VALUE = "x-contract-id";
+
+	protected String contractIdExtension = CONTRACT_ID_EXTENSION_DEFAULT_VALUE;
+
+
+	public static final String JSON_ESCAPE_DOUBLE_QUOTE = "";
+	public static final String JSON_ESCAPE_NEW_LINE = "";
+
+	public TestContainersCodegen() {
+		super();
+
+		generatorMetadata = GeneratorMetadata.newBuilder(generatorMetadata)
+				.stability(Stability.EXPERIMENTAL)
+				.build();
+
+		modifyFeatureSet(features -> features
+				.includeDocumentationFeatures(DocumentationFeature.Readme)
+				.wireFormatFeatures(EnumSet.of(WireFormatFeature.JSON, WireFormatFeature.XML))
+				.securityFeatures(EnumSet.noneOf(
+						SecurityFeature.class
+				))
+				.excludeGlobalFeatures(
+						GlobalFeature.XMLStructureDefinitions,
+						GlobalFeature.Callbacks,
+						GlobalFeature.LinkObjects,
+						GlobalFeature.ParameterStyling
+				)
+				.excludeSchemaSupportFeatures(
+						SchemaSupportFeature.Polymorphism
+				)
+				.excludeParameterFeatures(
+						ParameterFeature.Cookie
+				)
+		);
+
+		outputFolder = "generated-code/test-containers";
+
+		/*
+		 * Models.  You can write model files using the modelTemplateFiles map.
+		 * if you want to create one template for file, you can do so here.
+		 * for multiple files for model, just put another entry in the `modelTemplateFiles` with
+		 * a different extension
+		 */
+		modelTemplateFiles.put(
+				"model.mustache",
+				".go");
+
+		/*
+		 * Api classes.  You can write classes for each Api file with the apiTemplateFiles map.
+		 * as with models, add multiple entries with different extensions for multiple files per
+		 * class
+		 */
+		apiTemplateFiles.put(
+				"controller-api.mustache",   // the template to use
+				".go");       // the extension for each file to write
+
+		/*
+		 * Template Location.  This is the location which templates will be read from.  The generator
+		 * will use the resource stream to attempt to read the templates.
+		 */
+		embeddedTemplateDir = templateDir = "test-containers";
+
+		/*
+		 * Reserved words.  Override this with reserved words specific to your language
+		 */
+		setReservedWordsLowerCase(
+				Arrays.asList(
+						// data type
+						"string", "bool", "uint", "uint8", "uint16", "uint32", "uint64",
+						"int", "int8", "int16", "int32", "int64", "float32", "float64",
+						"complex64", "complex128", "rune", "byte", "uintptr",
+
+						"break", "default", "func", "interface", "select",
+						"case", "defer", "go", "map", "struct",
+						"chan", "else", "goto", "package", "switch",
+						"const", "fallthrough", "if", "range", "type",
+						"continue", "for", "import", "return", "var", "error", "nil")
+				// Added "error" as it's used so frequently that it may as well be a keyword
+		);
+
+		CliOption optServerPort = new CliOption("serverPort", "The network port the generated server binds to");
+		optServerPort.setType("int");
+		optServerPort.defaultValue(Integer.toString(serverPort));
+		cliOptions.add(optServerPort);
+
+		cliOptions.add(CliOption.newString(CONTRACT_ID_EXTENSION, "name of the extension that defines the Contract Id"));
+
+	}
+
+	@Override
+	public OperationsMap postProcessOperationsWithModels(OperationsMap objs, List<ModelMap> allModels) {
+		objs = super.postProcessOperationsWithModels(objs, allModels);
+
+		OperationMap operations = objs.getOperations();
+		List<CodegenOperation> operationList = operations.getOperation();
+		for (CodegenOperation codegenOperation : operationList) {
+			if (codegenOperation.path != null) {
+				codegenOperation.path = codegenOperation.path.replaceAll("\\{(.*?)\\}", ":$1");
+			}
+
+			List<ExampleItem> items = getExampleItems(codegenOperation);
+
+			if (!items.isEmpty()) {
+				codegenOperation.vendorExtensions.put("items", items);
+			}
+
+		}
+		return objs;
+	}
+
+	@Override
+	public void processOpts() {
+		super.processOpts();
+
+		/*
+		 * Additional Properties.  These values can be passed to the templates and
+		 * are available in models, apis, and supporting files
+		 */
+
+		if (additionalProperties.containsKey("serverPort")) {
+			this.serverPort = Integer.parseInt((String) additionalProperties.get("serverPort"));
+		} else {
+			additionalProperties.put("serverPort", serverPort);
+		}
+
+		if (additionalProperties().containsKey(CONTRACT_ID_EXTENSION)) {
+			contractIdExtension = additionalProperties().get(CONTRACT_ID_EXTENSION).toString();
+		}
+
+		modelPackage = packageName;
+		apiPackage = packageName;
+
+		/*
+		 * Supporting Files.  You can write single files for the generator with the
+		 * entire object tree available.  If the input file has a suffix of `.mustache
+		 * it will be processed by the template engine.  Otherwise, it will be copied
+		 */
+		supportingFiles.add(new SupportingFile("openapi.mustache", "api", "openapi.yaml"));
+		supportingFiles.add(new SupportingFile("main.mustache", "", "main.go"));
+		supportingFiles.add(new SupportingFile("Dockerfile.mustache", "", "Dockerfile"));
+		supportingFiles.add(new SupportingFile("routers.mustache", apiPath, "routers.go"));
+		supportingFiles.add(new SupportingFile("README.mustache", apiPath, "README.md")
+				.doNotOverwrite());
+		supportingFiles.add(new SupportingFile("go.mod.mustache", "go.mod"));
+	}
+
+	@Override
+	public String apiPackage() {
+		return apiPath;
+	}
+
+	/**
+	 * Configures the type of generator.
+	 *
+	 * @return the CodegenType for this generator
+	 * @see CodegenType
+	 */
+	@Override
+	public CodegenType getTag() {
+		return CodegenType.SERVER;
+	}
+
+	@Override
+	public GeneratorLanguage generatorLanguage() {
+		return GeneratorLanguage.GO;
+	}
+
+	/**
+	 * Configures a friendly name for the generator.  This will be used by the generator
+	 * to select the library with the -g flag.
+	 *
+	 * @return the friendly name for the generator
+	 */
+	@Override
+	public String getName() {
+		return "test-containers";
+	}
+
+	/**
+	 * Returns human-friendly help for the generator.  Provide the consumer with help
+	 * tips, parameters here
+	 *
+	 * @return A string value for the help message
+	 */
+	@Override
+	public String getHelp() {
+		return "Generates a Go server from an OpenAPI-Generator.";
+	}
+
+	/**
+	 * Location to write api files.  You can use the apiPackage() as defined when the class is
+	 * instantiated
+	 */
+	@Override
+	public String apiFileFolder() {
+		return outputFolder + File.separator + apiPackage().replace('.', File.separatorChar);
+	}
+
+	@Override
+	public String modelFileFolder() {
+		return outputFolder + File.separator + apiPackage().replace('.', File.separatorChar);
+	}
+
+	List<ExampleItem> getExampleItems(CodegenOperation codegenOperation) {
+		List<ExampleItem> items = new ArrayList<>();
+
+		if (!codegenOperation.getHasBodyParam()) {
+			// no body param
+			ExampleItem item = new ExampleItem();
+
+			item.setRequestBody(null);
+			item.setResponseBody(getResponseBody(codegenOperation.responses));
+			items.add(item);
+
+		} else {
+			// get request examples
+			if (codegenOperation.bodyParam.getContent().get("application/json") != null &&
+					codegenOperation.bodyParam.getContent().get("application/json").getExamples() != null) {
+				for (Map.Entry<String, Example> entry : codegenOperation.bodyParam.getContent().get("application/json").getExamples().entrySet()) {
+
+					Example responseExample = null;
+					Example requestExample = null;
+					String statusCode = null;
+
+					if (entry.getValue().get$ref() != null) {
+						requestExample = getExampleByRef(entry.getValue().get$ref());
+
+						if (requestExample != null) {
+
+							String requestExampleContractId = (String) requestExample.getExtensions().get(contractIdExtension);
+							String requestExampleSummary = requestExample.getSummary();
+
+							ExampleItem item = new ExampleItem();
+							// loop through responses
+							for (CodegenResponse response : codegenOperation.responses) {
+								if (response.getContent() != null && response.getContent().get("application/json") != null &&
+										response.getContent().get("application/json").getExamples() != null) {
+									for (Map.Entry<String, Example> respExample : response.getContent().get("application/json").getExamples().entrySet()) {
+										// loop through response examples
+										String ref = respExample.getValue().get$ref();
+										if (ref != null) {
+											// get response example by ref
+											Example e = getExampleByRef(ref);
+											String contractId = (String) e.getExtensions().get(contractIdExtension);
+											if (contractId.equalsIgnoreCase(requestExampleContractId) && !e.getSummary().equals(requestExampleSummary)) {
+												// found matching response example
+												responseExample = e;
+												statusCode = response.code;
+												break;
+											}
+
+										}
+									}
+								}
+							}
+
+							if (responseExample != null) {
+								item.setStatusCode(statusCode);
+								item.setRequestBody(getJsonFromExample(requestExample));
+								item.setResponseBody(getJsonFromExample(responseExample));
+
+								items.add(item);
+							}
+						}
+					}
+					
+				}
+			}
+		}
+		return items;
+	}
+
+	Example getExampleByRef(String ref) {
+		return this.openAPI.getComponents().getExamples().get(extractExampleByName(ref));
+	}
+
+	Example getExampleByContractId(String contractId, String summary) {
+		Example example = null;
+
+		for (Map.Entry<String, Example> responseEntry : this.openAPI.getComponents().getExamples().entrySet()) {
+			String contractId2 = (String) responseEntry.getValue().getExtensions().get(contractIdExtension);
+			if (contractId2.equalsIgnoreCase(contractId) && !responseEntry.getValue().getSummary().equals(summary)) {
+				example = responseEntry.getValue();
+				break;
+			}
+		}
+
+
+		return example;
+	}
+
+	String getResponseBody(List<CodegenResponse> responses) {
+		String ret = "";
+
+		for (CodegenResponse codegenResponse : responses) {
+			// check CodegenMediaType example (to add)
+			// get from example
+			if (codegenResponse.getContent().get("application/json") != null &&
+					codegenResponse.getContent().get("application/json").getExamples() != null) {
+				// get from examples
+
+				// use first
+				Optional<Map.Entry<String, Example>> firstExample = codegenResponse.getContent().get("application/json").getExamples().entrySet().stream().findFirst();
+				if (firstExample.isPresent()) {
+					if (firstExample.get().getValue().getValue() != null) {
+						Example example = firstExample.get().getValue();
+						ret = getJsonFromExample(example);
+					} else if (firstExample.get().getValue().get$ref() != null) {
+						String exampleRef = firstExample.get().getValue().get$ref();
+						Example example = this.openAPI.getComponents().getExamples().get(extractExampleByName(exampleRef));
+						ret = getJsonFromExample(example);
+					}
+
+				}
+
+			}
+			break;  // use one response
+		}
+
+		return ret;
+
+	}
+
+	String extractExampleByName(String ref) {
+		return ref.substring(ref.lastIndexOf("/") + 1);
+	}
+
+	// Supporting helpers
+
+	public String getType(CodegenProperty codegenProperty) {
+		if (codegenProperty.isNumeric) {
+			return "number";
+		} else if (codegenProperty.isDate) {
+			return "date";
+		} else {
+			return "string";
+		}
+	}
+
+	public String getJsonFromExample(Example example) {
+		String ret = "";
+
+		if (example == null) {
+			return ret;
+		}
+
+		if (example.getValue() instanceof ObjectNode) {
+			ret = convertToJson((ObjectNode) example.getValue());
+		} else if (example.getValue() instanceof LinkedHashMap) {
+			ret = convertToJson((LinkedHashMap) example.getValue());
+		}
+
+		return ret;
+	}
+
+	// array of attributes from JSON payload (ignore commas within quotes)
+	public String[] getAttributes(String json) {
+		return json.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1);
+	}
+
+	public String convertToJson(ObjectNode objectNode) {
+		return formatJson(objectNode.toString());
+	}
+
+	// convert to JSON (string) escaping and formatting
+	public String convertToJson(LinkedHashMap<String, Object> linkedHashMap) {
+		String ret = "";
+
+		return traverseMap(linkedHashMap, ret);
+	}
+
+	public String formatJson(String json) {
+
+		ObjectMapper objectMapper = new ObjectMapper();
+
+		try {
+			JsonNode actualObj = objectMapper.readTree(json);
+			json = actualObj.toPrettyString();
+
+		} catch (JsonProcessingException e) {
+			LOGGER.warn("Error formatting JSON", e);
+			json = "";
+		}
+
+		return json;
+	}
+
+	// traverse recursively
+	private String traverseMap(LinkedHashMap<String, Object> linkedHashMap, String ret) {
+
+		ret = ret + "{" + JSON_ESCAPE_NEW_LINE + " ";
+
+		int numVars = linkedHashMap.entrySet().size();
+		int counter = 1;
+
+		for (Map.Entry<String, Object> mapElement : linkedHashMap.entrySet()) {
+			String key = mapElement.getKey();
+			Object value = mapElement.getValue();
+
+			if (value instanceof String) {
+				// unescape double quotes already escaped
+				//value = ((String)value).replace("\\\"", "\"");
+
+				ret = ret + "\"" + key + JSON_ESCAPE_DOUBLE_QUOTE + ": " +
+						JSON_ESCAPE_DOUBLE_QUOTE + value + JSON_ESCAPE_DOUBLE_QUOTE;
+			} else if (value instanceof Integer) {
+				ret = ret + JSON_ESCAPE_DOUBLE_QUOTE + key + JSON_ESCAPE_DOUBLE_QUOTE + ": " +
+						value;
+			} else if (value instanceof LinkedHashMap) {
+				String in = ret + "\"" + key + JSON_ESCAPE_DOUBLE_QUOTE + ": ";
+				ret = traverseMap(((LinkedHashMap<String, Object>) value), in);
+			} else {
+				LOGGER.warn("Value type unrecognised: " + value.getClass());
+			}
+
+			if (counter < numVars) {
+				// add comma unless last attribute
+				ret = ret + "," + JSON_ESCAPE_NEW_LINE + " ";
+			}
+			counter++;
+		}
+
+		ret = ret + JSON_ESCAPE_NEW_LINE + "}";
+
+		return ret;
+	}
+
+
+	// Supporting models
+	public class ExampleItem {
+
+		private String statusCode;
+		private String requestBody;
+		private String responseBody;
+
+		public String getStatusCode() {
+			return statusCode;
+		}
+
+		public void setStatusCode(String statusCode) {
+			this.statusCode = statusCode;
+		}
+
+		public String getRequestBody() {
+			return requestBody;
+		}
+
+		public void setRequestBody(String requestBody) {
+			this.requestBody = requestBody;
+		}
+
+		public String getResponseBody() {
+			return responseBody;
+		}
+
+		public void setResponseBody(String responseBody) {
+			this.responseBody = responseBody;
+		}
+	}
 
 }

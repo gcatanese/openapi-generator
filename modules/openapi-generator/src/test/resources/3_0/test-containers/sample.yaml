@@ -78,6 +78,9 @@ paths:
               another:
                 $ref: '#/components/examples/post-user-another-request-200'
                 value: null
+              error 400:
+                $ref: '#/components/examples/post-user-error-request-400'
+                value: null
             schema:
               $ref: '#/components/schemas/post-user-request'
         description: Post the necessary fields for the API to create a new user.
@@ -96,6 +99,14 @@ paths:
                 $ref: '#/components/schemas/User'
           description: User Created
         "400":
+          content:
+            application/json:
+              examples:
+                error:
+                  $ref: '#/components/examples/post-user-error-response-400'
+                  value: null
+              schema:
+                $ref: '#/components/schemas/Error'
           description: Missing Required Information
         "409":
           description: Email Already Taken
@@ -175,6 +186,18 @@ components:
         - firstName
         - lastName
         - email
+    Error:
+      title: Error object
+      type: object
+      description: 'An error'
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+      required:
+        - code
+        - message
   examples:
     post-user-request-200:
       x-contract-id: post-user-200
@@ -190,6 +213,13 @@ components:
         firstName: Alan
         lastName: Dogman
         email: a.dogman@example.com
+    post-user-error-request-400:
+      x-contract-id: post-user-400
+      summary: Example request for POST with status 400
+      value:
+        firstName:
+        lastName:
+        email: r.irvine@example.com
     post-user-response-200:
       x-contract-id: post-user-200
       summary: Example response for POST with status 200
@@ -210,6 +240,12 @@ components:
         email: a.dogman@example.com
         emailVerified: false
         createDate: '2000-12-02'
+    post-user-error-response-400:
+      x-contract-id: post-user-400
+      summary: Example response for POST with status 400
+      value:
+        code: err 400
+        message: Invalid input
 tags:
   - name: basic
     description: Basic tag
