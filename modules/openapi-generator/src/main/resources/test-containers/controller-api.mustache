@@ -18,7 +18,7 @@ func {{nickname}}(c *gin.Context) {
 
 {{#vendorExtensions.items}}
 	{{^requestBody}}
-	c.Data(http.StatusOK, "application/json", []byte(`{{{responseBody}}}`))
+	c.Data(200, "application/json", []byte(`{{{responseBody}}}`))
 	{{/requestBody}}
 	{{#requestBody}}
 	data, _ := io.ReadAll(c.Request.Body)
