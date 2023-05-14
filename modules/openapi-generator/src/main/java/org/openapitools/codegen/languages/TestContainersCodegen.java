@@ -21,7 +21,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.swagger.v3.oas.models.examples.Example;
-import io.swagger.v3.oas.models.media.Schema;
 import org.openapitools.codegen.*;
 import org.openapitools.codegen.meta.GeneratorMetadata;
 import org.openapitools.codegen.meta.Stability;
@@ -34,6 +33,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class TestContainersCodegen extends AbstractGoCodegen implements CodegenConfig {
 
@@ -44,6 +44,13 @@ public class TestContainersCodegen extends AbstractGoCodegen implements CodegenC
     protected String apiPath = "api";
 
     protected String packageName = "openapi";
+
+    public static final String CONTRACT_ID_EXTENSION = "contractIdExtension";
+    public static final String CONTRACT_ID_EXTENSION_DEFAULT_VALUE = "x-contract-id";
+
+    protected String contractIdExtension = CONTRACT_ID_EXTENSION_DEFAULT_VALUE;
+
+
 
     public static final String JSON_ESCAPE_DOUBLE_QUOTE = "";
     public static final String JSON_ESCAPE_NEW_LINE = "";
@@ -125,6 +132,8 @@ public class TestContainersCodegen extends AbstractGoCodegen implements CodegenC
         optServerPort.defaultValue(Integer.toString(serverPort));
         cliOptions.add(optServerPort);
 
+        cliOptions.add(CliOption.newString(CONTRACT_ID_EXTENSION, "name of the extension that defines the Contract Id"));
+
     }
 
     @Override
@@ -161,6 +170,10 @@ public class TestContainersCodegen extends AbstractGoCodegen implements CodegenC
             this.serverPort = Integer.parseInt((String) additionalProperties.get("serverPort"));
         } else {
             additionalProperties.put("serverPort", serverPort);
+        }
+
+        if(additionalProperties().containsKey(CONTRACT_ID_EXTENSION)) {
+            contractIdExtension = additionalProperties().get(CONTRACT_ID_EXTENSION).toString();
         }
 
         modelPackage = packageName;
@@ -240,21 +253,75 @@ public class TestContainersCodegen extends AbstractGoCodegen implements CodegenC
     List<ExampleItem> getExampleItems(CodegenOperation codegenOperation) {
         List<ExampleItem> items = new ArrayList<>();
 
-        ExampleItem item = new ExampleItem();
-
-        if(!codegenOperation.getHasBodyParam()) {
+        if (!codegenOperation.getHasBodyParam()) {
             // no body param
+            ExampleItem item = new ExampleItem();
 
-            item.setRequestBody("");
+            item.setRequestBody(null);
             item.setResponseBody(getResponseBody(codegenOperation.responses));
+            items.add(item);
 
         } else {
+            // get request examples
+            if (codegenOperation.bodyParam.getContent().get("application/json") != null &&
+                    codegenOperation.bodyParam.getContent().get("application/json").getExamples() != null) {
+                for (Map.Entry<String, Example> entry : codegenOperation.bodyParam.getContent().get("application/json").getExamples().entrySet()) {
+
+                    ExampleItem item = new ExampleItem();
+
+
+                    Example responseExample = null;
+                    Example requestExample = null;
+
+                    if (entry.getValue().get$ref() != null) {
+                        requestExample = getExampleByRef(entry.getValue().get$ref());
+
+                        if (requestExample != null) {
+                            // find matching response example
+                            String contractId = (String) requestExample.getExtensions().get(contractIdExtension);
+                            String summary = requestExample.getSummary();
+
+                            if (contractId != null) {
+                                responseExample = getExampleByContractId(contractId, summary);
+
+                            }
+                        }
+
+                        if (responseExample != null) {
+                            item.setRequestBody(getJsonFromExample(requestExample));
+                            item.setResponseBody(getJsonFromExample(responseExample));
+
+                            items.add(item);
+
+                        }
+
+                    }
+
+                }
+            }
+
+
+        }
+        return items;
+    }
+
+    Example getExampleByRef(String ref) {
+        return this.openAPI.getComponents().getExamples().get(extractExampleByName(ref));
+    }
+
+    Example getExampleByContractId(String contractId, String summary) {
+        Example example = null;
+
+        for (Map.Entry<String, Example> responseEntry : this.openAPI.getComponents().getExamples().entrySet()) {
+            String contractId2 = (String) responseEntry.getValue().getExtensions().get(contractIdExtension);
+            if(contractId2.equalsIgnoreCase(contractId) && !responseEntry.getValue().getSummary().equals(summary)) {
+                example = responseEntry.getValue();
+                break;
+            }
         }
 
-        items.add(item);
 
-        return items;
-
+        return example;
     }
 
     String getResponseBody(List<CodegenResponse> responses) {
@@ -278,6 +345,7 @@ public class TestContainersCodegen extends AbstractGoCodegen implements CodegenC
                         Example example = this.openAPI.getComponents().getExamples().get(extractExampleByName(exampleRef));
                         ret = getJsonFromExample(example);
                     }
+
                 }
 
             }
@@ -398,8 +466,17 @@ public class TestContainersCodegen extends AbstractGoCodegen implements CodegenC
     // Supporting models
     public class ExampleItem {
 
+        private String statusCode;
         private String requestBody;
         private String responseBody;
+
+        public String getStatusCode() {
+            return statusCode;
+        }
+
+        public void setStatusCode(String statusCode) {
+            this.statusCode = statusCode;
+        }
 
         public String getRequestBody() {
             return requestBody;

@@ -3,6 +3,7 @@ package {{packageName}}
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -63,3 +64,13 @@ var routes = Routes{
 		{{operationId}},
 	},{{/operation}}{{/operations}}{{/apis}}{{/apiInfo}}
 }
+
+// strip  white-space, tabs, newline from string
+func strip(str string) string {
+	str = strings.Replace(str, " ", "", -1)
+	str = strings.Replace(str, "\t", "", -1)
+	str = strings.Replace(str, "\n", "", -1)
+
+	return str
+}
+

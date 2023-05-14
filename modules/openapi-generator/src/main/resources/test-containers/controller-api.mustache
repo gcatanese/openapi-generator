@@ -4,6 +4,8 @@ package {{packageName}}
 {{#operations}}
 import (
 	"net/http"
+	"io"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 ){{#operation}}
@@ -13,11 +15,24 @@ import (
 // Deprecated
 {{/isDeprecated}}
 func {{nickname}}(c *gin.Context) {
+
 {{#vendorExtensions.items}}
-{{#pathParams}}
+	{{^requestBody}}
 	c.Data(http.StatusOK, "application/json", []byte(`{{{responseBody}}}`))
-{{/pathParams}}
+	{{/requestBody}}
+	{{#requestBody}}
+	data, _ := io.ReadAll(c.Request.Body)
+	input:=string(data)
+
+	expected{{-index}}:=string([]byte(`{{{requestBody}}}`))
+	if(strings.EqualFold(strip(input), strip(expected{{-index}}))) {
+		c.Data({{statusCode}}, "application/json", []byte(`{{{responseBody}}}`))
+	}
+	{{/requestBody}}
+
 {{/vendorExtensions.items}}
+	// fallback
+	c.JSON(http.StatusOK, gin.H{})
 {{^vendorExtensions.items}}
 	c.JSON(http.StatusOK, gin.H{})
 {{/vendorExtensions.items}}
