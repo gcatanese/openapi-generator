@@ -33,7 +33,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicReference;
 
 public class TestContainersCodegen extends AbstractGoCodegen implements CodegenConfig {
 
@@ -253,11 +252,12 @@ public class TestContainersCodegen extends AbstractGoCodegen implements CodegenC
 		List<ExampleItem> items = new ArrayList<>();
 
 		if (!codegenOperation.getHasBodyParam()) {
-			// no body param
+			// no body
 			ExampleItem item = new ExampleItem();
 
+			item.setStatusCode("200");
 			item.setRequestBody(null);
-			item.setResponseBody(getResponseBody(codegenOperation.responses));
+			item.setResponseBody(getFirstResponseExample(codegenOperation.responses));
 			items.add(item);
 
 		} else {
@@ -311,7 +311,7 @@ public class TestContainersCodegen extends AbstractGoCodegen implements CodegenC
 							}
 						}
 					}
-					
+
 				}
 			}
 		}
@@ -337,7 +337,7 @@ public class TestContainersCodegen extends AbstractGoCodegen implements CodegenC
 		return example;
 	}
 
-	String getResponseBody(List<CodegenResponse> responses) {
+	String getFirstResponseExample(List<CodegenResponse> responses) {
 		String ret = "";
 
 		for (CodegenResponse codegenResponse : responses) {
@@ -345,8 +345,6 @@ public class TestContainersCodegen extends AbstractGoCodegen implements CodegenC
 			// get from example
 			if (codegenResponse.getContent().get("application/json") != null &&
 					codegenResponse.getContent().get("application/json").getExamples() != null) {
-				// get from examples
-
 				// use first
 				Optional<Map.Entry<String, Example>> firstExample = codegenResponse.getContent().get("application/json").getExamples().entrySet().stream().findFirst();
 				if (firstExample.isPresent()) {
@@ -358,7 +356,6 @@ public class TestContainersCodegen extends AbstractGoCodegen implements CodegenC
 						Example example = this.openAPI.getComponents().getExamples().get(extractExampleByName(exampleRef));
 						ret = getJsonFromExample(example);
 					}
-
 				}
 
 			}
