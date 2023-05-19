@@ -145,7 +145,7 @@ public class TestContainersCodegen extends AbstractGoCodegen implements CodegenC
 				codegenOperation.path = codegenOperation.path.replaceAll("\\{(.*?)\\}", ":$1");
 			}
 
-			List<ExampleItem> items = getExampleItems(codegenOperation);
+			List<Interaction> items = getInteractions(codegenOperation);
 
 			if (!items.isEmpty()) {
 				codegenOperation.vendorExtensions.put("items", items);
@@ -248,20 +248,20 @@ public class TestContainersCodegen extends AbstractGoCodegen implements CodegenC
 		return outputFolder + File.separator + apiPackage().replace('.', File.separatorChar);
 	}
 
-	List<ExampleItem> getExampleItems(CodegenOperation codegenOperation) {
-		List<ExampleItem> items = new ArrayList<>();
+	List<Interaction> getInteractions(CodegenOperation codegenOperation) {
+		List<Interaction> interactions = new ArrayList<>();
 
 		if (!codegenOperation.getHasBodyParam()) {
 			// no body
-			ExampleItem item = new ExampleItem();
+			Interaction interaction = new Interaction();
 
-			item.setStatusCode("200");
-			item.setRequestBody(null);
-			item.setResponseBody(getFirstResponseExample(codegenOperation.responses));
-			items.add(item);
+			interaction.setStatusCode("200");
+			interaction.setRequestBody(null);
+			interaction.setResponseBody(getFirstResponseExample(codegenOperation.responses));
+			interactions.add(interaction);
 
 		} else {
-			// get request examples
+			// loop through request examples
 			if (codegenOperation.bodyParam.getContent().get("application/json") != null &&
 					codegenOperation.bodyParam.getContent().get("application/json").getExamples() != null) {
 				for (Map.Entry<String, Example> entry : codegenOperation.bodyParam.getContent().get("application/json").getExamples().entrySet()) {
@@ -272,23 +272,32 @@ public class TestContainersCodegen extends AbstractGoCodegen implements CodegenC
 
 					if (entry.getValue().get$ref() != null) {
 						requestExample = getExampleByRef(entry.getValue().get$ref());
+					} else if (entry.getValue().getValue() != null) {
+						requestExample = entry.getValue();
+					}
+
+					if (requestExample != null) {
+						requestExample = getExampleByRef(entry.getValue().get$ref());
 
 						if (requestExample != null) {
 
 							String requestExampleContractId = (String) requestExample.getExtensions().get(contractIdExtension);
 							String requestExampleSummary = requestExample.getSummary();
 
-							ExampleItem item = new ExampleItem();
+							Interaction item = new Interaction();
 							// loop through responses
 							for (CodegenResponse response : codegenOperation.responses) {
 								if (response.getContent() != null && response.getContent().get("application/json") != null &&
 										response.getContent().get("application/json").getExamples() != null) {
 									for (Map.Entry<String, Example> respExample : response.getContent().get("application/json").getExamples().entrySet()) {
 										// loop through response examples
-										String ref = respExample.getValue().get$ref();
-										if (ref != null) {
-											// get response example by ref
-											Example e = getExampleByRef(ref);
+										Example e = null;
+										if(respExample.getValue().get$ref() != null) {
+											e = getExampleByRef(respExample.getValue().get$ref());
+										} else if (respExample.getValue() != null) {
+											e = respExample.getValue();
+										}
+										if (e != null) {
 											String contractId = (String) e.getExtensions().get(contractIdExtension);
 											if (contractId.equalsIgnoreCase(requestExampleContractId) && !e.getSummary().equals(requestExampleSummary)) {
 												// found matching response example
@@ -296,7 +305,6 @@ public class TestContainersCodegen extends AbstractGoCodegen implements CodegenC
 												statusCode = response.code;
 												break;
 											}
-
 										}
 									}
 								}
@@ -307,7 +315,7 @@ public class TestContainersCodegen extends AbstractGoCodegen implements CodegenC
 								item.setRequestBody(getJsonFromExample(requestExample));
 								item.setResponseBody(getJsonFromExample(responseExample));
 
-								items.add(item);
+								interactions.add(item);
 							}
 						}
 					}
@@ -315,7 +323,7 @@ public class TestContainersCodegen extends AbstractGoCodegen implements CodegenC
 				}
 			}
 		}
-		return items;
+		return interactions;
 	}
 
 	Example getExampleByRef(String ref) {
@@ -471,8 +479,8 @@ public class TestContainersCodegen extends AbstractGoCodegen implements CodegenC
 	}
 
 
-	// Supporting models
-	public class ExampleItem {
+	// Interaction between consumer and provider
+	public class Interaction {
 
 		private String statusCode;
 		private String requestBody;
